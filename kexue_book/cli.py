@@ -332,13 +332,18 @@ def main() -> None:
         _build_per_category_books(posts, args)
         return
 
-    _build_single_book(posts, args)
+    _build_single_book(posts, args, selected_topics)
 
 
-def _build_single_book(posts: list[Post], args) -> None:
+def _build_single_book(posts: list[Post], args, selected_topics: tuple[str, ...]) -> None:
     out_dir = Path(args.out_dir)
     chapters_dir = out_dir / "chapters"
     manifest_path = out_dir / "manifest.json"
+
+    # 整书按“主题顺序 → 组内日期顺序”排列（稳定排序保留组内日期序，
+    # 这样 --order desc 只反转组内顺序），书签才能形成 主题→文章 两级结构
+    topic_rank = {topic: i for i, topic in enumerate(selected_topics)}
+    posts = sorted(posts, key=lambda p: topic_rank.get(p.topic, len(selected_topics)))
 
     if args.retry_failed and not manifest_path.exists():
         raise SystemExit(f"[error] --retry-failed 找不到 manifest: {manifest_path}")

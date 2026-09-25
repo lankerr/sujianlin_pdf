@@ -138,6 +138,20 @@ python -m kexue_book.cli --start 2009-01-01 --end 2026-12-31 \
 
 查看主题清单：`python -m kexue_book.cli --list-topics`
 
+### 调规则 / 重建整书（不重新渲染）
+
+分类规则集中在 `kexue_book/taxonomy.py`，改完后：
+
+```bash
+# 只重新归类并刷新索引（不重爬、不渲染）
+python scripts/reclassify.py output/posts_all.json --out output
+
+# 用已渲染的章节 PDF 重建整书（改了排序/书签/分类时）
+python scripts/remerge.py output --name Kexue-Topics --cover
+```
+
+正常构建也支持 `--from-json output/posts_all.json` 跳过重新爬取。
+
 ---
 
 ## 默认行为与功能
