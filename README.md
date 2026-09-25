@@ -1,8 +1,37 @@
-# Scientific Spaces Big-Data PDF builder
+# Scientific Spaces Big-Data PDF builder（主题分类版）
 
-将科学空间（[spaces.ac.cn](https://spaces.ac.cn)）“信息时代”（Big-Data 分类）下的文章抓取并合成一本带书签和页码的 PDF，方便在 iPad 等设备上离线阅读。
+将科学空间（[spaces.ac.cn](https://spaces.ac.cn)）的文章抓取、按**主题分类**整理，并合成带书签和页码的 PDF，方便在 iPad 等设备上离线阅读。
+
+本 fork 在原版（BaochaiXue/sujianlin_pdf，仅抓"信息时代"单一分类）基础上增强：
+
+* **主题分类体系**：新增 `kexue_book/taxonomy.py`，把文章按标题关键词 + 原生分类门控归入 18 个主题（第二套主题分类），默认启用其中 9 个技术/数学主题；
+* **多分类抓取**：默认抓取 信息时代（Big-Data）+ 数学研究（Mathematics）+ 千奇百怪（Everything）三个原生分类并自动去重；
+* **反 Cookie 质询**：站点近期对无 Cookie 请求返回 403，爬虫已内置自动质询重试；
+* **主题索引**：`--metadata-only` 一键输出 `index.md` / `posts.json`（按主题分组、含日期与链接），先看清单再决定要不要渲染 PDF；
+* **两级书签**：合并成单本 PDF 时书签为 主题 → 文章 两级结构；
+* **分册输出**：`--per-category` 可为每个主题单独生成一本 PDF。
 
 > ⚠️ **版权说明**：科学空间的文章采用 CC BY-NC-SA 协议（署名-非商业性使用-相同方式共享）。本项目只抓取公开网页并本地生成 PDF，仅供个人学习与收藏使用，请勿用于任何商业用途，转发时请注明原作者与原站链接。
+
+---
+
+## 主题分类（默认启用 9 个）
+
+| topic_id | 名称 | 参考篇数 |
+|---|---|---|
+| `dl-basics` | 深度学习基础 | ~123 |
+| `embedding` | 词向量与Embedding | ~24 |
+| `llm` | 大模型与Transformer | ~155 |
+| `generative` | 生成模型 | ~124 |
+| `optimization` | 优化与训练 | ~110 |
+| `math` | 数学工具 | ~381 |
+| `probability` | 概率统计与信息论 | ~85 |
+| `geometry` | 几何与方程 | ~106 |
+| `nlp` | NLP与信息抽取 | ~93 |
+
+另有 9 个默认关闭的主题（`engineering` 工程工具、`astronomy` 天文科普、`phychem` 物理化学、`biology` 生物自然、`photography` 图片摄影、`qa` 科普问答与百科、`site` 资源与站务、`essay` 阅读写作与随笔、`misc` 其他），用 `--all-topics` 或 `--topic astronomy,...` 打开。
+
+分类规则是启发式的（标题关键词优先级匹配 + 原生分类门控），全部集中在 `kexue_book/taxonomy.py`，可按需增删关键词微调。
 
 ---
 
@@ -11,12 +40,16 @@
 ```text
 kexue_book/
   __init__.py   # 包入口，导出 Post 类型
-  types.py      # Post 元数据结构（标题 / URL / 日期）
-  crawl.py      # 爬取 Big-Data 分类页，收集文章元信息
+  types.py      # Post 元数据结构（标题 / URL / 日期 / 原生分类 / 主题）
+  taxonomy.py   # 主题分类体系：18 个主题 + 关键词规则 + 门控表
+  crawl.py      # 爬取原生分类页（含 Cookie 质询重试），收集元信息并归类
+  index.py      # 按主题输出 index.md / posts.json 索引与统计
   render.py     # Playwright 渲染单篇 HTML -> 单篇 PDF
-  merge.py      # 合并章节 PDF，添加封面、书签、页码
+  merge.py      # 合并章节 PDF，添加封面、两级书签、页码
   cli.py        # 命令行入口（python -m kexue_book.cli）
 output/          # 运行后生成的输出目录
+  index.md       # 主题索引（--metadata-only 或正常构建时生成）
+  posts.json     # 全部文章元数据（按主题分组）
   chapters/      # 渲染出的单篇 PDF
   manifest.json  # 每篇文章的渲染状态、PDF 路径、页数和失败原因
   *.pdf          # 最终合并后的“选集”PDF
@@ -51,34 +84,72 @@ python -m playwright install chromium
 
 ## 快速开始
 
-下面命令会把 2015–2025 年的“信息时代”文章打包成一本 PDF，并加上封面和页码：
+### 第一步：先看主题索引（不渲染 PDF）
 
 ```bash
 python -m kexue_book.cli \
-  --start 2015-01-01 \
-  --end   2025-12-31 \
-  --out-dir output \
-  --name "Kexue-BigData" \
-  --cover \
-  --workers 16
+  --start 2009-01-01 \
+  --end   2026-12-31 \
+  --metadata-only \
+  --out-dir output
 ```
 
-生成结果示例：
+输出 `output/index.md`（按 9 个主题分组的文章清单：日期、标题、链接、原生分类）和 `output/posts.json`，并打印各主题篇数统计。
 
-* 单篇 PDF：`output/chapters/001-XXXX.pdf`, `002-YYYY.pdf`, ...
-* 渲染清单：`output/manifest.json`
-* 合并书籍：`output/Kexue-BigData-2015-01-01-2025-12-31.pdf`
+### 第二步：合成一本带两级书签的 PDF
+
+```bash
+python -m kexue_book.cli \
+  --start 2009-01-01 \
+  --end   2026-12-31 \
+  --out-dir output \
+  --name "Kexue-Topics" \
+  --cover \
+  --workers 6
+```
+
+书签结构为 主题（一级）→ 文章（二级），主题顺序即上表顺序，主题内按日期从旧到新。
+
+### 或者：每个主题一本分册
+
+```bash
+python -m kexue_book.cli \
+  --start 2009-01-01 \
+  --end   2026-12-31 \
+  --out-dir output \
+  --per-category \
+  --cover \
+  --workers 6
+```
+
+输出到 `output/<topic-id>/<topic-id>-<start>-<end>.pdf`，每本封面写明主题名。
+
+### 只想要其中几个主题
+
+```bash
+# 只要 大模型与Transformer + 生成模型 + 数学工具
+python -m kexue_book.cli --start 2009-01-01 --end 2026-12-31 \
+  --topic llm,generative,math --out-dir output-top3
+
+# 也可以用全部 18 个主题
+python -m kexue_book.cli --start 2009-01-01 --end 2026-12-31 \
+  --all-topics --out-dir output-all
+```
+
+查看主题清单：`python -m kexue_book.cli --list-topics`
 
 ---
 
 ## 默认行为与功能
 
-* 文章按日期从旧到新排列（等价于 `--order asc`），想从新到旧则使用 `--order desc`。
-* 每篇文章会生成 **可点击的 PDF 书签目录**：在阅读器的“目录/书签”面板中可以直接跳转到对应文章。
+* 默认抓取原生分类 `Big-Data`（信息时代）、`Mathematics`（数学研究）、`Everything`（千奇百怪），可用 `--source-category` 指定；一篇属于多个分类的文章自动去重合并。
+* 默认只保留 9 个技术/数学主题的文章，其余（工程工具、天文……）被过滤掉。
+* 文章先按主题顺序、再按日期从旧到新排列（`--order desc` 反转组内日期顺序）。
+* 每篇文章会生成 **可点击的 PDF 书签目录**：单本模式为两级（主题 → 文章），分册模式为一级。
 * 页脚会印出 **真实页码**，从整本书的第一页（封面）开始连续编号；可用 `--no-page-numbers` 关闭。
-* 可选封面 `--cover`，标题为 **“苏剑林选集”**，副标题为 “Scientific Spaces · Big-Data”。
+* 可选封面 `--cover`，标题为 **“苏剑林选集”**（分册模式为 “苏剑林选集 · 主题名”）。
 * 会自动隐藏站点的侧边栏、评论区等元素，正文和公式（MathJax 渲染）都会保留。
-* 支持按标题关键词选择或排除文章，例如只打包标题含 “Transformer” 或 “注意力” 的文章。
+* 支持按标题关键词选择或排除文章（`--title-keyword` / `--exclude-title-keyword`）。
 * 每次渲染会生成 `manifest.json`，记录每篇文章的标题、URL、日期、序号、PDF 路径、状态、失败原因和页数。
 * 支持断点续跑：`--resume` 会跳过已有且可读取、页数大于 0 的单篇 PDF；`--retry-failed` 只重试上一次 `manifest.json` 中失败的文章。
 
@@ -88,115 +159,73 @@ python -m kexue_book.cli \
 
 核心参数：
 
-* `--start YYYY-MM-DD`：起始日期（含），必选。
-* `--end YYYY-MM-DD`：结束日期（含），必选。
+* `--start YYYY-MM-DD`：起始日期（含）。
+* `--end YYYY-MM-DD`：结束日期（含）。
 * `--out-dir PATH`：输出目录（默认：`output`）。
 * `--name NAME`：生成的 PDF 文件名前缀（默认：`BigData`）。
 
+主题相关（本 fork 新增）：
+
+* `--source-category SLUG`：只抓这些原生分类，可重复或逗号分隔（默认 `Big-Data,Mathematics,Everything`）。
+* `--topic ID`：只保留这些主题，可重复或逗号分隔（默认 9 个技术/数学主题）。
+* `--all-topics`：不过滤主题，保留全部 18 个。
+* `--list-topics`：打印主题清单后退出。
+* `--metadata-only`：只抓元数据并输出 `index.md` / `posts.json`，不渲染 PDF。
+* `--per-category`：每个主题单独合成一本 PDF。
+
 排版 / 排序相关：
 
-* `--order asc|desc`  
-  按日期排序方式：
-  * `asc`：从旧到新（默认，适合作为“时间线教科书”）。
-  * `desc`：从新到旧（最近的文章在前，适合追新）。
-
-* `--cover`  
-  在最前面加一页封面，标题写“苏剑林选集”。
-
-* `--no-page-numbers`  
-  关闭每页底部的页码（默认是 **有** 页码的）。
+* `--order asc|desc`：组内按日期排序方式（默认 `asc`）。
+* `--cover`：在最前面加一页封面。
+* `--no-page-numbers`：关闭每页底部的页码。
 
 标题过滤：
 
-* `--title-keyword TEXT`
-  只保留标题包含指定关键词的文章。可以重复使用，也可以用英文逗号分隔多个关键词，例如 `--title-keyword Transformer,注意力`。
-
-* `--title-match any|all`
-  多个 `--title-keyword` 的匹配方式：
-  * `any`：命中任意一个关键词即可保留（默认）。
-  * `all`：必须同时命中所有关键词才保留。
-
-* `--exclude-title-keyword TEXT`
-  排除标题包含指定关键词的文章。可以重复使用，也可以用英文逗号分隔多个关键词。
-
-* `--title-case-sensitive`
-  标题关键词匹配改为大小写敏感。默认不区分大小写。
+* `--title-keyword TEXT`：只保留标题包含指定关键词的文章；可重复或逗号分隔。
+* `--title-match any|all`：多个关键词的匹配方式（默认 `any`）。
+* `--exclude-title-keyword TEXT`：排除标题包含指定关键词的文章。
+* `--title-case-sensitive`：标题关键词匹配改为大小写敏感。
 
 渲染控制：
 
-* `--delay-ms N`  
-  每篇文章在打印 PDF 前额外等待的毫秒数，用于确保 MathJax 等脚本完成渲染（默认：4000）。
+* `--delay-ms N`：每篇文章打印 PDF 前额外等待毫秒数（默认 4000，等 MathJax）。
+* `--workers N`：并行渲染进程数（默认 1；4~6 视机器性能）。
+* `--resume`：复用已存在的有效单篇 PDF。
+* `--retry-failed`：只重试上次 manifest 中失败的文章。
 
-* `--workers N`  
-  并行渲染的进程数（默认：1，单进程顺序渲染）。大约 4~6 视机器性能选择，过高会占用更多 CPU/内存、也会同时给源站施压。
+调试：
 
-* `--resume`
-  复用 `output/chapters/` 中已经存在且有效的单篇 PDF，只渲染缺失或损坏的文章。有效性的判断标准是 PDF 能被读取且页数大于 0。
-
-* `--retry-failed`
-  读取上一次的 `output/manifest.json`，只重试其中状态为失败的文章；上次成功且 PDF 仍有效的文章会直接复用。如果没有旧的 `manifest.json`，命令会退出并提示。
-
-调试用参数：
-
-* `--limit N`  
-  只抓取并渲染前 N 篇文章，适合调试样式/字体时使用，不想一次扫全站。
-  如果同时使用标题过滤，程序会先按标题过滤，再应用 `--limit`。
-
-标题过滤示例：
-
-```bash
-python -m kexue_book.cli \
-  --start 2015-01-01 \
-  --end 2025-12-31 \
-  --title-keyword Transformer,注意力 \
-  --exclude-title-keyword 闲聊 \
-  --out-dir output-transformer
-```
+* `--limit N`：只处理前 N 篇（先按主题过滤再应用）。
 
 ---
 
 ## 整体流程
 
-运行 `python -m kexue_book.cli ...` 时会执行三步：
+运行 `python -m kexue_book.cli ...` 时会执行：
 
 1. **抓取元信息（crawl）**  
-   从 `https://spaces.ac.cn/category/Big-Data` 起始，按分页依次抓取：  
-   * 每篇文章的标题、URL 和发布日期；  
-   * 按 `--start` / `--end` 过滤在时间区间内的文章；  
-   * 按 `--order` 指定的顺序排序。
-   * 如果设置了标题关键词，则按 `--title-keyword` / `--exclude-title-keyword` 进一步筛选。
+   依次抓取各原生分类的分页列表（`https://spaces.ac.cn/category/<slug>`），内置 Cookie 质询自动重试；收集标题、URL、日期，按 URL 去重合并多分类信息；按 `--start`/`--end` 过滤时间区间。
 
-2. **单篇渲染（render）**  
-   对每一篇文章：  
-   * 使用 Playwright + Chromium 打开文章页面；  
-   * 等待网络稳定，再额外等待 `--delay-ms` 毫秒以保证 MathJax 完全渲染；  
-   * 注入一段打印专用 CSS：隐藏头部导航、侧边栏、评论等非正文；控制版芯宽度、字体和行距；  
-   * 调用 `page.pdf()` 导出为 A4 纸大小的单篇 PDF，存到 `output/chapters/`；  
-   * 支持 `--workers N` 并行渲染（每个进程自己的 Chromium），个别失败会跳过并继续。
-   * 写入 `output/manifest.json`，记录每篇文章成功/失败、失败原因、PDF 路径和页数。
+2. **主题归类（taxonomy）**  
+   按“标题关键词优先级匹配 + 原生分类门控”把每篇文章归入 18 个主题之一；默认只保留 9 个技术/数学主题，其余主题被过滤。`--metadata-only` 到此为止，输出索引。
 
-3. **合并与排版（merge）**  
-   使用 `pypdf` 和 `reportlab`：  
-   * 合并前输出完整性检查：成功多少篇、失败多少篇，以及缺失的 URL；
-   * 按顺序合并所有单篇 PDF；  
-   * 如果开启 `--cover`，在最前面添加一页封面；  
-   * 为每篇文章创建一个 PDF 书签（outline item），相当于一个可点击的目录；  
-   * 如果没有 `--no-page-numbers`，为合并后的每一页生成底部居中的页码（1, 2, 3, ...），包括封面在内。
+3. **单篇渲染（render）**  
+   使用 Playwright + Chromium 打开文章页面，等待 MathJax 渲染完成，注入打印 CSS 后导出 A4 单篇 PDF 到 `chapters/`；支持并行与断点续跑。
 
-最终得到一本文档级别的 “苏剑林选集 · 信息时代” PDF。
+4. **合并与排版（merge）**  
+   合并前输出完整性检查；按主题顺序合并所有单篇 PDF，生成两级书签（主题 → 文章）；可选封面与连续页码。`--per-category` 时改为按主题分别合并成多本。
 
 ---
 
 ## 注意事项与小贴士
 
 * 第一次运行时 Playwright 会下载 Chromium，时间可能略长。
+* 站点对无 Cookie 请求返回 403，爬虫已自动处理；若仍被拦（如 IP 级限流），等几分钟再试。
 * 如果科学空间将来更换主题或改版 HTML 结构，`crawl.py` 里的 CSS 选择器（例如 `div.Post`, `span.submitted`）可能需要微调。
-* 封面目前使用 ReportLab 的内置 Helvetica 字体直接绘制 **“苏剑林选集”**，在某些环境下可能出现方框。想要更漂亮/稳健的中文封面，可以：
-  * 已默认改用 ReportLab 内置的 `STSong-Light` 来避免方框；如果想换成自定义中文字体（如 Noto Serif SC / 思源宋体），
-  * 在 `merge.py` 的 `_make_cover_pdf` 中注册对应 TTF 并替换 `setFont("STSong-Light", 32)`。
-* 渲染逻辑默认假设原文中的公式由 MathJax 渲染，且在 `--delay-ms` 指定时间内能完成；如果发现部分页面公式缺失，可以适当调大该参数。
+* 分类规则是启发式的，个别边界文章可能与原站主题分类有出入；调整 `taxonomy.py` 里的关键词即可，改完对 `posts.json` 重新归类不需要重新爬取正文列表。
+* 封面默认使用 ReportLab 内置 `STSong-Light`；想换自定义中文字体，在 `merge.py` 的 `_make_cover_pdf` 中注册对应 TTF 并替换 `setFont("STSong-Light", 32)`。
 * 生成的 PDF 仅用于 **个人学习和收藏**，请尊重原站点的 CC BY-NC-SA 协议，转载或分发时务必注明原作者“苏剑林”和科学空间链接。
 
 ---
 
-生成好 PDF 之后，把最终的 `*.pdf` 丢进 iCloud / AirDrop 给 iPad，用任意 PDF 阅读器打开，就可以当一本“官方未发行的《苏剑林·信息时代选集》”慢慢啃了。
+生成好 PDF 之后，把最终的 `*.pdf` 丢进 iCloud / AirDrop 给 iPad，用任意 PDF 阅读器打开，就可以当一本“官方未发行的《苏剑林·主题选集》”慢慢啃了。

@@ -60,15 +60,24 @@ def merge_pdfs(
     add_cover: bool = False,
     add_page_numbers: bool = False,
     cover_title: str = "苏剑林选集",
+    group_by_topics: bool = False,
+    topic_name_resolver=None,
 ) -> Path:
     """
     Merge single-article PDFs into one book with optional cover, bookmarks, and page numbers.
+
+    group_by_topics=True 时生成两级书签：主题（一级）→ 文章（二级），
+    需要每篇 post 的 topic 字段已填写；topic_name_resolver 用于把
+    topic_id 翻译成展示名（默认用 taxonomy.topic_name）。
     """
     posts = list(posts)
     pdf_paths = list(pdf_paths)
 
     if len(posts) != len(pdf_paths):
         raise ValueError("pdf_paths 和 posts 数量必须一致")
+
+    if topic_name_resolver is None:
+        from .taxonomy import topic_name as topic_name_resolver
 
     writer = PdfWriter()
 
@@ -82,6 +91,8 @@ def merge_pdfs(
 
     # Merge article PDFs and add bookmarks with proper offset
     current_page = cover_page_count
+    current_topic_parent = None
+    current_topic_id: str | None = None
     for pdf_path, post in zip(pdf_paths, posts):
         reader = PdfReader(str(pdf_path))
         num_pages = len(reader.pages)
@@ -90,7 +101,14 @@ def merge_pdfs(
             writer.add_page(page)
 
         if add_bookmarks and num_pages > 0:
-            writer.add_outline_item(post.title, current_page)
+            if group_by_topics and post.topic and post.topic != current_topic_id:
+                current_topic_id = post.topic
+                current_topic_parent = writer.add_outline_item(
+                    topic_name_resolver(post.topic), current_page
+                )
+            writer.add_outline_item(
+                post.title, current_page, parent=current_topic_parent
+            )
 
         current_page += num_pages
 
